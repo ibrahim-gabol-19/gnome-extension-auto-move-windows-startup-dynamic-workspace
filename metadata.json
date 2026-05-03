@@ -1,0 +1,12 @@
+{
+  "uuid": "auto-setup-windows@ibrahimgdesktop",
+  "name": "Auto Setup Windows",
+  "description": "Automatically moves Chrome, Obsidian, and Calendar to specific workspaces. Includes a debug button.",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48"
+  ],
+  "url": "https://github.com/yourusername/auto-setup-windows"
+}
