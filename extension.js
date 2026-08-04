@@ -5,6 +5,10 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
+// How long after login we auto-place windows of tracked apps. After this,
+// new/changed windows are left alone — only the debug/re-sync button forces a move.
+const STARTUP_GRACE_PERIOD_SECONDS = 20;
+
 // Define the workspaces for your apps (0-based index: 0 is Workspace 1)
 const APP_WORKSPACES = {
     'org.gnome.calendar': 0,
@@ -20,6 +24,7 @@ export default class AutoSetupWindowsExtension extends Extension {
         console.log("[Auto-Setup-Windows] Extension enabled.");
         this._windowCreatedId = global.display.connect('window-created', this._onWindowCreated.bind(this));
         this._signals = [];
+        this._startupPhase = true;
 
         // Add a button to the top panel for debugging
         this._indicator = new PanelMenu.Button(0.0, this.metadata.name, false);
@@ -48,6 +53,19 @@ export default class AutoSetupWindowsExtension extends Extension {
             this._startupTimeoutId = null;
             return GLib.SOURCE_REMOVE;
         });
+
+        // After the grace period, stop auto-placing windows: disconnect the
+        // window-created listener so windows opened later are left alone.
+        // The debug/re-sync button can still force a move at any time.
+        this._graceTimeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, STARTUP_GRACE_PERIOD_SECONDS, () => {
+            this._startupPhase = false;
+            if (this._windowCreatedId) {
+                global.display.disconnect(this._windowCreatedId);
+                this._windowCreatedId = null;
+            }
+            this._graceTimeoutId = null;
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     disable() {
@@ -55,6 +73,11 @@ export default class AutoSetupWindowsExtension extends Extension {
         if (this._startupTimeoutId) {
             GLib.Source.remove(this._startupTimeoutId);
             this._startupTimeoutId = null;
+        }
+
+        if (this._graceTimeoutId) {
+            GLib.Source.remove(this._graceTimeoutId);
+            this._graceTimeoutId = null;
         }
 
         if (this._windowCreatedId) {
@@ -85,15 +108,20 @@ export default class AutoSetupWindowsExtension extends Extension {
         this._checkAndMoveWindow(window);
     }
 
-    _checkAndMoveWindow(window) {
+    // `force` bypasses the startup-grace-period gate; used for explicit
+    // scans (initial run, delayed sync, debug button) rather than the
+    // passive window-created/notify::wm-class listeners.
+    _checkAndMoveWindow(window, force = false) {
+        if (!force && !this._startupPhase) return;
+
         let wmClass = window.get_wm_class();
         if (!wmClass) return;
-        
+
         wmClass = wmClass.toLowerCase();
-        
+
         if (wmClass in APP_WORKSPACES) {
             let targetWorkspaceIndex = APP_WORKSPACES[wmClass];
-            // Give Mutter (Wayland) 500ms to map the window securely 
+            // Give Mutter (Wayland) 500ms to map the window securely
             // before transferring it to another workspace.
             GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
                 this._moveToWorkspace(window, targetWorkspaceIndex);
@@ -128,7 +156,7 @@ export default class AutoSetupWindowsExtension extends Extension {
             let windows = workspace.list_windows();
             
             for (let window of windows) {
-                this._checkAndMoveWindow(window);
+                this._checkAndMoveWindow(window, true);
             }
         }
     }
