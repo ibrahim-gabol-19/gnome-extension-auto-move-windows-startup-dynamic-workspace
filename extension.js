@@ -1,62 +1,51 @@
-import St from 'gi://St';
 import GLib from 'gi://GLib';
-import Clutter from 'gi://Clutter';
-import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
+import Shell from 'gi://Shell';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
-// How long after login we auto-place windows of tracked apps. After this,
-// new/changed windows are left alone — only the debug/re-sync button forces a move.
 const STARTUP_GRACE_PERIOD_SECONDS = 20;
 
-// Define the workspaces for your apps (0-based index: 0 is Workspace 1)
-const APP_WORKSPACES = {
-    'org.gnome.calendar': 0,
-    'gnome-calendar': 0,
-    'obsidian': 1,
-    'google-chrome': 2,
-    'google-chrome-stable': 2,
-    'chrome': 2
-};
+function parseAppWorkspaces(entries) {
+    const map = new Map();
+    for (const entry of entries) {
+        const idx = entry.lastIndexOf(':');
+        if (idx === -1)
+            continue;
+        const workspace = parseInt(entry.slice(idx + 1), 10);
+        if (Number.isNaN(workspace))
+            continue;
+        map.set(entry.slice(0, idx), workspace);
+    }
+    return map;
+}
 
 export default class AutoSetupWindowsExtension extends Extension {
     enable() {
         console.log("[Auto-Setup-Windows] Extension enabled.");
+
+        this._settings = this.getSettings();
+        this._appWorkspaces = parseAppWorkspaces(this._settings.get_strv('app-workspace-list'));
+        this._appWorkspacesChangedId = this._settings.connect('changed::app-workspace-list', () => {
+            this._appWorkspaces = parseAppWorkspaces(this._settings.get_strv('app-workspace-list'));
+        });
+
         this._windowCreatedId = global.display.connect('window-created', this._onWindowCreated.bind(this));
         this._signals = [];
         this._startupPhase = true;
 
-        // Add a button to the top panel for debugging
-        this._indicator = new PanelMenu.Button(0.0, this.metadata.name, false);
-        const icon = new St.Icon({
-            icon_name: 'view-app-grid-symbolic',
-            style_class: 'system-status-icon',
-        });
-        this._indicator.add_child(icon);
-
-        this._indicator.connect('button-press-event', () => {
-            this._runDebugProcess();
-            return Clutter.EVENT_PROPAGATE;
-        });
-
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
-        
         // Run once on load just in case apps are already open
-        this._runDebugProcess();
+        this._scanOpenWindows();
 
-        // WAYLAND FIX: Apps at login compete to spawn, causing GNOME's dynamic 
-        // workspaces to collapse empty ones. We wait 4 seconds for Calendar, Obsidian, 
-        // and Chrome to fully spawn, then force a synchronization to place them correctly.
+        // WAYLAND FIX: Apps at login compete to spawn, causing GNOME's dynamic
+        // workspaces to collapse empty ones. We wait 4 seconds for tracked apps
+        // to fully spawn, then force a synchronization to place them correctly.
         this._startupTimeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 4, () => {
-            console.log("[Auto-Setup-Windows] Running delayed startup sync...");
-            this._runDebugProcess();
+            this._scanOpenWindows();
             this._startupTimeoutId = null;
             return GLib.SOURCE_REMOVE;
         });
 
         // After the grace period, stop auto-placing windows: disconnect the
         // window-created listener so windows opened later are left alone.
-        // The debug/re-sync button can still force a move at any time.
         this._graceTimeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, STARTUP_GRACE_PERIOD_SECONDS, () => {
             this._startupPhase = false;
             if (this._windowCreatedId) {
@@ -93,10 +82,12 @@ export default class AutoSetupWindowsExtension extends Extension {
         }
         this._signals = [];
 
-        if (this._indicator) {
-            this._indicator.destroy();
-            this._indicator = null;
+        if (this._appWorkspacesChangedId) {
+            this._settings.disconnect(this._appWorkspacesChangedId);
+            this._appWorkspacesChangedId = null;
         }
+        this._settings = null;
+        this._appWorkspaces = null;
     }
 
     _onWindowCreated(display, window) {
@@ -108,31 +99,29 @@ export default class AutoSetupWindowsExtension extends Extension {
         this._checkAndMoveWindow(window);
     }
 
-    // `force` bypasses the startup-grace-period gate; used for explicit
-    // scans (initial run, delayed sync, debug button) rather than the
-    // passive window-created/notify::wm-class listeners.
+    // `force` bypasses the startup-grace-period gate; used for the explicit
+    // startup scans rather than the passive window-created/notify::wm-class listeners.
     _checkAndMoveWindow(window, force = false) {
         if (!force && !this._startupPhase) return;
 
-        let wmClass = window.get_wm_class();
-        if (!wmClass) return;
+        const app = Shell.WindowTracker.get_default().get_window_app(window);
+        if (!app) return;
 
-        wmClass = wmClass.toLowerCase();
+        const appId = app.get_id();
+        if (!this._appWorkspaces.has(appId)) return;
 
-        if (wmClass in APP_WORKSPACES) {
-            let targetWorkspaceIndex = APP_WORKSPACES[wmClass];
-            // Give Mutter (Wayland) 500ms to map the window securely
-            // before transferring it to another workspace.
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
-                this._moveToWorkspace(window, targetWorkspaceIndex);
-                return GLib.SOURCE_REMOVE;
-            });
-        }
+        const targetWorkspaceIndex = this._appWorkspaces.get(appId);
+        // Give Mutter (Wayland) 500ms to map the window securely
+        // before transferring it to another workspace.
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+            this._moveToWorkspace(window, targetWorkspaceIndex);
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _moveToWorkspace(window, index) {
         const workspaceManager = global.workspace_manager;
-        
+
         // Ensure we have enough workspaces
         while (workspaceManager.n_workspaces <= index) {
             workspaceManager.append_new_workspace(false, global.get_current_time());
@@ -141,20 +130,18 @@ export default class AutoSetupWindowsExtension extends Extension {
         let targetWorkspace = workspaceManager.get_workspace_by_index(index);
         if (targetWorkspace && window.get_workspace() !== targetWorkspace) {
             window.change_workspace(targetWorkspace);
-            console.log(`[Auto-Setup-Windows] DEBUG: Moved '${window.get_wm_class()}' to Workspace ${index + 1}`);
         }
     }
 
-    // The debug button triggers this to parse all open windows
-    _runDebugProcess() {
-        console.log("[Auto-Setup-Windows] DEBUG: Scanning all open windows...");
+    // Used at startup to place windows of tracked apps that are already open.
+    _scanOpenWindows() {
         const workspaceManager = global.workspace_manager;
         const numWorkspaces = workspaceManager.n_workspaces;
 
         for (let i = 0; i < numWorkspaces; i++) {
             let workspace = workspaceManager.get_workspace_by_index(i);
             let windows = workspace.list_windows();
-            
+
             for (let window of windows) {
                 this._checkAndMoveWindow(window, true);
             }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.auto-setup-windows" path="/org/gnome/shell/extensions/auto-setup-windows/">
+    <key name="app-workspace-list" type="as">
+      <default>[]</default>
+      <summary>Tracked applications and their target workspace</summary>
+      <description>
+        List of "app-id:workspace-index" strings, e.g. "org.gnome.Calendar.desktop:0".
+        Each entry maps an application (by its .desktop file id) to the
+        0-based workspace index its windows should be moved to while the
+        startup grace period is active.
+      </description>
+    </key>
+  </schema>
+</schemalist>
