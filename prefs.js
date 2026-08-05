@@ -156,7 +156,7 @@ export default class AutoSetupWindowsPreferences extends ExtensionPreferences {
                     .map(e => e.appId === appId ? { appId, workspace: spin.get_value_as_int() - 1 } : e);
                 const compacted = compactWorkspaces(updated);
                 saveEntries(settings, compacted);
-                // Values only (no rows added/removed) — update spin buttons
+                // Values only (no rows added/removed): update spin buttons
                 // in place instead of rebuilding, so focus isn't lost.
                 syncSpinValues(compacted);
             });

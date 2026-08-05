@@ -1,5 +1,5 @@
 {
-  "uuid": "auto-setup-windows@ibrahimgdesktop",
+  "uuid": "auto-setup-windows@ibrahimgabol.com",
   "name": "Auto Setup Windows",
   "description": "Automatically moves chosen applications to specific workspaces at login. Configure which apps and workspaces in the extension's settings.",
   "shell-version": [
@@ -8,6 +8,6 @@
     "47",
     "48"
   ],
-  "url": "https://github.com/yourusername/auto-setup-windows",
+  "url": "https://github.com/ibrahim-gabol-19/gnome-extension-auto-setup-windows",
   "settings-schema": "org.gnome.shell.extensions.auto-setup-windows"
 }

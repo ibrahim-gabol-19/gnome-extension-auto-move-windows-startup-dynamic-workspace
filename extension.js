@@ -20,8 +20,6 @@ function parseAppWorkspaces(entries) {
 
 export default class AutoSetupWindowsExtension extends Extension {
     enable() {
-        console.log("[Auto-Setup-Windows] Extension enabled.");
-
         this._settings = this.getSettings();
         this._appWorkspaces = parseAppWorkspaces(this._settings.get_strv('app-workspace-list'));
         this._appWorkspacesChangedId = this._settings.connect('changed::app-workspace-list', () => {
@@ -31,6 +29,7 @@ export default class AutoSetupWindowsExtension extends Extension {
         this._windowCreatedId = global.display.connect('window-created', this._onWindowCreated.bind(this));
         this._signals = [];
         this._startupPhase = true;
+        this._pendingMoveTimeoutIds = new Set();
 
         // Run once on load just in case apps are already open
         this._scanOpenWindows();
@@ -58,7 +57,6 @@ export default class AutoSetupWindowsExtension extends Extension {
     }
 
     disable() {
-        console.log("[Auto-Setup-Windows] Extension disabled.");
         if (this._startupTimeoutId) {
             GLib.Source.remove(this._startupTimeoutId);
             this._startupTimeoutId = null;
@@ -88,6 +86,10 @@ export default class AutoSetupWindowsExtension extends Extension {
         }
         this._settings = null;
         this._appWorkspaces = null;
+
+        for (const timeoutId of this._pendingMoveTimeoutIds)
+            GLib.Source.remove(timeoutId);
+        this._pendingMoveTimeoutIds = null;
     }
 
     _onWindowCreated(display, window) {
@@ -113,10 +115,12 @@ export default class AutoSetupWindowsExtension extends Extension {
         const targetWorkspaceIndex = this._appWorkspaces.get(appId);
         // Give Mutter (Wayland) 500ms to map the window securely
         // before transferring it to another workspace.
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+        const timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+            this._pendingMoveTimeoutIds.delete(timeoutId);
             this._moveToWorkspace(window, targetWorkspaceIndex);
             return GLib.SOURCE_REMOVE;
         });
+        this._pendingMoveTimeoutIds.add(timeoutId);
     }
 
     _moveToWorkspace(window, index) {
