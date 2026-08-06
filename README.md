@@ -1,6 +1,6 @@
-# Auto Setup Windows
+# Auto-Move Windows on Startup with Dynamic Workspace
 
-Auto Setup Windows is a GNOME Shell extension that moves selected applications to chosen workspaces during startup. It is designed for setups that use dynamic workspaces and want certain apps placed automatically when the session begins.
+Auto-Move Windows on Startup with Dynamic Workspace is a GNOME Shell extension that moves selected applications to chosen workspaces during startup. It is designed for setups that use dynamic workspaces and want certain apps placed automatically when the session begins.
 
 ## Status
 
@@ -26,7 +26,25 @@ glib-compile-schemas schemas/
 
 Open the extension preferences and add the applications you want tracked. Each application is assigned a workspace number, starting at 1 in the UI.
 
-The extension stores its settings in the schema `org.gnome.shell.extensions.auto-setup-windows`.
+Please note, gaps are not allowed in workspace assignment.
+
+Example of valid configuration:
+
+```text
+App1: Workspace 1
+App2: Workspace 2
+App3: Workspace 3
+```
+
+Example of invalid configuration:
+
+```text
+App1: Workspace 1
+App2: Workspace 3
+App3: Workspace 4
+```
+
+The extension stores its settings in the schema `org.gnome.shell.extensions.auto.move.windows.startup.dynamic.workspace`.
 
 ## Build And Check
 
@@ -41,3 +59,7 @@ After changing the JavaScript code, restart GNOME Shell or log out and back in t
 ## License
 
 This project is licensed under the GNU General Public License, version 3. See `COPYING` for the full text.
+
+## Contributing
+
+Please make a GitHub issue.
