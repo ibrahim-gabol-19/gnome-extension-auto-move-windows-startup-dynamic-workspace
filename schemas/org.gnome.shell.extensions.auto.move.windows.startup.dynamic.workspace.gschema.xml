@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <schemalist>
-  <schema id="org.gnome.shell.extensions.auto-setup-windows" path="/org/gnome/shell/extensions/auto-setup-windows/">
+  <schema id="org.gnome.shell.extensions.auto.move.windows.startup.dynamic.workspace" path="/org/gnome/shell/extensions/auto/move/windows/startup/dynamic/workspace/">
     <key name="app-workspace-list" type="as">
       <default>[]</default>
       <summary>Tracked applications and their target workspace</summary>

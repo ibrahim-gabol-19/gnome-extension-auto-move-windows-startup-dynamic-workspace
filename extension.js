@@ -1,4 +1,5 @@
 import GLib from 'gi://GLib';
+import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 
@@ -26,10 +27,10 @@ export default class AutoSetupWindowsExtension extends Extension {
             this._appWorkspaces = parseAppWorkspaces(this._settings.get_strv('app-workspace-list'));
         });
 
-        this._windowCreatedId = global.display.connect('window-created', this._onWindowCreated.bind(this));
-        this._signals = [];
+        this._trackedWindows = new Map();
         this._startupPhase = true;
-        this._pendingMoveTimeoutIds = new Set();
+
+        this._windowCreatedId = global.display.connect('window-created', this._onWindowCreated.bind(this));
 
         // Run once on load just in case apps are already open
         this._scanOpenWindows();
@@ -72,13 +73,18 @@ export default class AutoSetupWindowsExtension extends Extension {
             this._windowCreatedId = null;
         }
 
-        // Clean up window signals
-        for (let sig of this._signals) {
-            if (sig.window && sig.id) {
-                sig.window.disconnect(sig.id);
+        if (this._trackedWindows) {
+            for (const [window, tracking] of this._trackedWindows.entries()) {
+                if (tracking.wmClassId)
+                    window.disconnect(tracking.wmClassId);
+                if (tracking.unmanageId)
+                    window.disconnect(tracking.unmanageId);
+                if (tracking.timeoutId)
+                    GLib.Source.remove(tracking.timeoutId);
             }
+            this._trackedWindows.clear();
+            this._trackedWindows = null;
         }
-        this._signals = [];
 
         if (this._appWorkspacesChangedId) {
             this._settings.disconnect(this._appWorkspacesChangedId);
@@ -86,68 +92,106 @@ export default class AutoSetupWindowsExtension extends Extension {
         }
         this._settings = null;
         this._appWorkspaces = null;
-
-        for (const timeoutId of this._pendingMoveTimeoutIds)
-            GLib.Source.remove(timeoutId);
-        this._pendingMoveTimeoutIds = null;
     }
 
     _onWindowCreated(display, window) {
-        let signalId = window.connect('notify::wm-class', () => {
+        if (this._trackedWindows.has(window))
+            return;
+
+        const wmClassId = window.connect('notify::wm-class', () => {
             this._checkAndMoveWindow(window);
         });
 
-        this._signals.push({ window: window, id: signalId });
+        const unmanageId = window.connect('unmanaged', () => {
+            this._clearTrackedWindow(window);
+        });
+
+        this._trackedWindows.set(window, { wmClassId, unmanageId, timeoutId: null });
         this._checkAndMoveWindow(window);
     }
 
-    // `force` bypasses the startup-grace-period gate; used for the explicit
-    // startup scans rather than the passive window-created/notify::wm-class listeners.
+    _clearTrackedWindow(window) {
+        if (!this._trackedWindows || !this._trackedWindows.has(window))
+            return;
+
+        const tracking = this._trackedWindows.get(window);
+        if (tracking.wmClassId)
+            window.disconnect(tracking.wmClassId);
+        if (tracking.unmanageId)
+            window.disconnect(tracking.unmanageId);
+        if (tracking.timeoutId)
+            GLib.Source.remove(tracking.timeoutId);
+
+        this._trackedWindows.delete(window);
+    }
+
     _checkAndMoveWindow(window, force = false) {
-        if (!force && !this._startupPhase) return;
+        if (!force && !this._startupPhase)
+            return;
+
+        // Ignore dialogs, splash screens, popups, utility windows, etc.
+        if (window.window_type !== Meta.WindowType.NORMAL || window.is_skip_taskbar())
+            return;
 
         const app = Shell.WindowTracker.get_default().get_window_app(window);
-        if (!app) return;
+        if (!app)
+            return;
 
         const appId = app.get_id();
-        if (!this._appWorkspaces.has(appId)) return;
+        if (!this._appWorkspaces.has(appId))
+            return;
 
         const targetWorkspaceIndex = this._appWorkspaces.get(appId);
-        // Give Mutter (Wayland) 500ms to map the window securely
-        // before transferring it to another workspace.
+
+        const tracking = this._trackedWindows.get(window);
+        if (tracking && tracking.timeoutId) {
+            GLib.Source.remove(tracking.timeoutId);
+            tracking.timeoutId = null;
+        }
+
         const timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
-            this._pendingMoveTimeoutIds.delete(timeoutId);
-            this._moveToWorkspace(window, targetWorkspaceIndex);
+            if (this._trackedWindows && this._trackedWindows.has(window)) {
+                const item = this._trackedWindows.get(window);
+                if (item)
+                    item.timeoutId = null;
+                this._moveToWorkspace(window, targetWorkspaceIndex);
+            }
             return GLib.SOURCE_REMOVE;
         });
-        this._pendingMoveTimeoutIds.add(timeoutId);
+
+        if (tracking) {
+            tracking.timeoutId = timeoutId;
+        }
     }
 
     _moveToWorkspace(window, index) {
         const workspaceManager = global.workspace_manager;
 
-        // Ensure we have enough workspaces
+        // Ensure target workspace index exists
         while (workspaceManager.n_workspaces <= index) {
             workspaceManager.append_new_workspace(false, global.get_current_time());
         }
 
-        let targetWorkspace = workspaceManager.get_workspace_by_index(index);
+        const targetWorkspace = workspaceManager.get_workspace_by_index(index);
         if (targetWorkspace && window.get_workspace() !== targetWorkspace) {
             window.change_workspace(targetWorkspace);
         }
     }
 
-    // Used at startup to place windows of tracked apps that are already open.
     _scanOpenWindows() {
         const workspaceManager = global.workspace_manager;
         const numWorkspaces = workspaceManager.n_workspaces;
 
         for (let i = 0; i < numWorkspaces; i++) {
-            let workspace = workspaceManager.get_workspace_by_index(i);
-            let windows = workspace.list_windows();
+            const workspace = workspaceManager.get_workspace_by_index(i);
+            const windows = workspace.list_windows();
 
-            for (let window of windows) {
-                this._checkAndMoveWindow(window, true);
+            for (const window of windows) {
+                if (this._trackedWindows.has(window)) {
+                    this._checkAndMoveWindow(window, true);
+                } else {
+                    this._onWindowCreated(global.display, window);
+                }
             }
         }
     }
