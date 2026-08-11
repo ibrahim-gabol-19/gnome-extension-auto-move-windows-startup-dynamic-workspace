@@ -9,5 +9,5 @@
     "48"
   ],
   "url": "https://github.com/ibrahim-gabol-19/gnome-extension-auto-move-windows-startup-dynamic-workspace",
-  "settings-schema": "org.gnome.shell.extensions.auto.move.windows.startup.dynamic.workspace"
+  "settings-schema": "org.gnome.shell.extensions.auto-move-windows-startup-dynamic-workspace"
 }

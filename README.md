@@ -44,7 +44,7 @@ App2: Workspace 3
 App3: Workspace 4
 ```
 
-The extension stores its settings in the schema `org.gnome.shell.extensions.auto.move.windows.startup.dynamic.workspace`.
+The extension stores its settings in the schema `org.gnome.shell.extensions.auto-move-windows-startup-dynamic-workspace`.
 
 ## Build And Check
 

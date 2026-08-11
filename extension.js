@@ -23,14 +23,14 @@ export default class AutoSetupWindowsExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._appWorkspaces = parseAppWorkspaces(this._settings.get_strv('app-workspace-list'));
-        this._appWorkspacesChangedId = this._settings.connect('changed::app-workspace-list', () => {
+        this._settings.connectObject('changed::app-workspace-list', () => {
             this._appWorkspaces = parseAppWorkspaces(this._settings.get_strv('app-workspace-list'));
-        });
+        }, this);
 
         this._trackedWindows = new Map();
         this._startupPhase = true;
 
-        this._windowCreatedId = global.display.connect('window-created', this._onWindowCreated.bind(this));
+        global.display.connectObject('window-created', this._onWindowCreated.bind(this), this);
 
         // Run once on load just in case apps are already open
         this._scanOpenWindows();
@@ -48,10 +48,7 @@ export default class AutoSetupWindowsExtension extends Extension {
         // window-created listener so windows opened later are left alone.
         this._graceTimeoutId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, STARTUP_GRACE_PERIOD_SECONDS, () => {
             this._startupPhase = false;
-            if (this._windowCreatedId) {
-                global.display.disconnect(this._windowCreatedId);
-                this._windowCreatedId = null;
-            }
+            global.display.disconnectObject(this);
             this._graceTimeoutId = null;
             return GLib.SOURCE_REMOVE;
         });
@@ -68,17 +65,11 @@ export default class AutoSetupWindowsExtension extends Extension {
             this._graceTimeoutId = null;
         }
 
-        if (this._windowCreatedId) {
-            global.display.disconnect(this._windowCreatedId);
-            this._windowCreatedId = null;
-        }
+        global.display.disconnectObject(this);
 
         if (this._trackedWindows) {
             for (const [window, tracking] of this._trackedWindows.entries()) {
-                if (tracking.wmClassId)
-                    window.disconnect(tracking.wmClassId);
-                if (tracking.unmanageId)
-                    window.disconnect(tracking.unmanageId);
+                window.disconnectObject(this);
                 if (tracking.timeoutId)
                     GLib.Source.remove(tracking.timeoutId);
             }
@@ -86,10 +77,8 @@ export default class AutoSetupWindowsExtension extends Extension {
             this._trackedWindows = null;
         }
 
-        if (this._appWorkspacesChangedId) {
-            this._settings.disconnect(this._appWorkspacesChangedId);
-            this._appWorkspacesChangedId = null;
-        }
+        if (this._settings)
+            this._settings.disconnectObject(this);
         this._settings = null;
         this._appWorkspaces = null;
     }
@@ -98,15 +87,12 @@ export default class AutoSetupWindowsExtension extends Extension {
         if (this._trackedWindows.has(window))
             return;
 
-        const wmClassId = window.connect('notify::wm-class', () => {
-            this._checkAndMoveWindow(window);
-        });
+        window.connectObject(
+            'notify::wm-class', () => this._checkAndMoveWindow(window),
+            'unmanaged', () => this._clearTrackedWindow(window),
+            this);
 
-        const unmanageId = window.connect('unmanaged', () => {
-            this._clearTrackedWindow(window);
-        });
-
-        this._trackedWindows.set(window, { wmClassId, unmanageId, timeoutId: null });
+        this._trackedWindows.set(window, { timeoutId: null });
         this._checkAndMoveWindow(window);
     }
 
@@ -115,10 +101,7 @@ export default class AutoSetupWindowsExtension extends Extension {
             return;
 
         const tracking = this._trackedWindows.get(window);
-        if (tracking.wmClassId)
-            window.disconnect(tracking.wmClassId);
-        if (tracking.unmanageId)
-            window.disconnect(tracking.unmanageId);
+        window.disconnectObject(this);
         if (tracking.timeoutId)
             GLib.Source.remove(tracking.timeoutId);
 
