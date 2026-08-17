@@ -1,5 +1,8 @@
 # Auto-Move Windows on Startup with Dynamic Workspace
 
+[![ko-fi](https://img.shields.io/badge/Support%20me%20on%20Ko--fi-F16061?style=flat&logo=ko-fi&logoColor=white)](https://ko-fi.com/ibg019)
+
+
 Auto-Move Windows on Startup with Dynamic Workspace is a GNOME Shell extension that moves selected applications to chosen workspaces during startup. It is designed for setups that use dynamic workspaces and want certain apps placed automatically when the session begins.
 
 ## Status
